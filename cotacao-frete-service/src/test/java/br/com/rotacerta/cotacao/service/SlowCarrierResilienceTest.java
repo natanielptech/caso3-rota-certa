@@ -13,6 +13,7 @@ import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -25,6 +26,7 @@ import org.springframework.test.context.DynamicPropertySource;
 class SlowCarrierResilienceTest {
     private static HttpServer partnerServer;
     private static ExecutorService partnerExecutor;
+    private static final AtomicReference<String> observedTraceparent = new AtomicReference<>();
 
     @Autowired
     private FreightQuoteService quoteService;
@@ -45,6 +47,7 @@ class SlowCarrierResilienceTest {
         partnerExecutor = Executors.newCachedThreadPool();
         partnerServer.setExecutor(partnerExecutor);
         partnerServer.createContext("/transvale", exchange -> {
+            observedTraceparent.set(exchange.getRequestHeaders().getFirst("traceparent"));
             try {
                 TimeUnit.SECONDS.sleep(30);
                 respond(exchange, "{\"transportadora\":\"transvale\",\"preco\":12.00,\"prazoDias\":3}");
@@ -53,10 +56,14 @@ class SlowCarrierResilienceTest {
                 exchange.close();
             }
         });
-        partnerServer.createContext("/rapida", exchange ->
-                respond(exchange, "{\"transportadora\":\"rapida\",\"preco\":15.00,\"prazoDias\":2}"));
-        partnerServer.createContext("/economica", exchange ->
-                respond(exchange, "{\"transportadora\":\"economica\",\"preco\":10.00,\"prazoDias\":4}"));
+        partnerServer.createContext("/rapida", exchange -> {
+            observedTraceparent.set(exchange.getRequestHeaders().getFirst("traceparent"));
+            respond(exchange, "{\"transportadora\":\"rapida\",\"preco\":15.00,\"prazoDias\":2}");
+        });
+        partnerServer.createContext("/economica", exchange -> {
+            observedTraceparent.set(exchange.getRequestHeaders().getFirst("traceparent"));
+            respond(exchange, "{\"transportadora\":\"economica\",\"preco\":10.00,\"prazoDias\":4}");
+        });
         partnerServer.start();
     }
 
@@ -91,6 +98,7 @@ class SlowCarrierResilienceTest {
                         }));
         assertThat(responses.get(0).cotacoes()).anyMatch(quote -> "rapida".equals(quote.transportadora())
                 && !quote.estimada());
+        assertThat(observedTraceparent.get()).matches("00-[0-9a-f]{32}-[0-9a-f]{16}-0[01]");
     }
 
     private static void respond(com.sun.net.httpserver.HttpExchange exchange, String body) throws IOException {

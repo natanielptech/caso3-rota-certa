@@ -6,6 +6,9 @@ import br.com.rotacerta.cotacao.config.ResilienceConfiguration.CarrierResilience
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.resilience4j.bulkhead.BulkheadFullException;
 import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
+import io.micrometer.tracing.Span;
+import io.micrometer.tracing.Tracer;
+import io.micrometer.tracing.propagation.Propagator;
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.net.URI;
@@ -18,7 +21,6 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -27,6 +29,8 @@ public class PartnerQuoteClient {
     private final CarrierResilience resilience;
     private final ReferenceRateTable rateTable;
     private final ObjectMapper objectMapper;
+    private final Tracer tracer;
+    private final Propagator propagator;
     private final java.util.Map<String, HttpClient> clients;
     private final java.util.Map<String, ExecutorService> executors;
 
@@ -34,11 +38,15 @@ public class PartnerQuoteClient {
             CarrierProperties properties,
             CarrierResilience resilience,
             ReferenceRateTable rateTable,
-            ObjectMapper objectMapper) {
+            ObjectMapper objectMapper,
+            Tracer tracer,
+            Propagator propagator) {
         this.properties = properties;
         this.resilience = resilience;
         this.rateTable = rateTable;
         this.objectMapper = objectMapper;
+        this.tracer = tracer;
+        this.propagator = propagator;
         this.executors = new java.util.concurrent.ConcurrentHashMap<>();
         this.clients = new java.util.concurrent.ConcurrentHashMap<>();
         properties.getUrls().keySet().forEach(name -> {
@@ -69,36 +77,53 @@ public class PartnerQuoteClient {
     }
 
     private CarrierQuote fetchWithTimeout(String carrier, String origin, String destination, BigDecimal weight) {
-        String url = properties.getUrls().get(carrier);
-        if (url == null) {
-            throw new IllegalArgumentException("URL não configurada para " + carrier);
-        }
-        String target = url + "?origem=" + encode(origin) + "&destino=" + encode(destination) + "&peso=" + weight;
-        HttpRequest request = HttpRequest.newBuilder(URI.create(target))
-                .timeout(Duration.ofMillis(properties.getTimeoutMs()))
-                .GET()
-                .build();
-        CompletableFuture<CarrierQuote> future = clients.get(carrier)
-                .sendAsync(request, HttpResponse.BodyHandlers.ofString())
-                .thenApply(response -> {
-                    if (response.statusCode() < 200 || response.statusCode() >= 300) {
-                        throw new IllegalStateException("Transportadora retornou HTTP " + response.statusCode());
-                    }
-                    try {
-                        return objectMapper.readValue(response.body(), CarrierQuote.class);
-                    } catch (IOException ex) {
-                        throw new IllegalStateException("Resposta inválida da transportadora", ex);
-                    }
-                });
-        try {
-            return resilience.timeLimiter().apply(carrier).executeFutureSupplier(() -> future);
-        } catch (TimeoutException | ExecutionException ex) {
-            future.cancel(true);
-            throw new IllegalStateException("Tempo limite excedido na transportadora " + carrier, ex);
+        Span span = tracer.nextSpan().name("carrier.quote").tag("peer.service", carrier).start();
+        CompletableFuture<CarrierQuote> future = null;
+        try (Tracer.SpanInScope ignored = tracer.withSpan(span)) {
+            String url = properties.getUrls().get(carrier);
+            if (url == null) {
+                throw new IllegalArgumentException("URL não configurada para " + carrier);
+            }
+            String target = url + "?origem=" + encode(origin) + "&destino=" + encode(destination) + "&peso=" + weight;
+            HttpRequest.Builder requestBuilder = HttpRequest.newBuilder(URI.create(target))
+                    .timeout(Duration.ofMillis(properties.getTimeoutMs()))
+                    .GET();
+            propagator.inject(span.context(), requestBuilder, (builder, key, value) -> builder.header(key, value));
+            CompletableFuture<CarrierQuote> pending = clients.get(carrier)
+                    .sendAsync(requestBuilder.build(), HttpResponse.BodyHandlers.ofString())
+                    .thenApply(response -> {
+                        if (response.statusCode() < 200 || response.statusCode() >= 300) {
+                            throw new IllegalStateException("Transportadora retornou HTTP " + response.statusCode());
+                        }
+                        try {
+                            return objectMapper.readValue(response.body(), CarrierQuote.class);
+                        } catch (IOException ex) {
+                            throw new IllegalStateException("Resposta inválida da transportadora", ex);
+                        }
+                    });
+            future = pending;
+            return resilience.timeLimiter().apply(carrier).executeFutureSupplier(() -> pending);
         } catch (InterruptedException ex) {
-            future.cancel(true);
+            if (future != null) {
+                future.cancel(true);
+            }
             Thread.currentThread().interrupt();
+            span.error(ex);
             throw new IllegalStateException("Chamada interrompida para " + carrier, ex);
+        } catch (ExecutionException ex) {
+            if (future != null) {
+                future.cancel(true);
+            }
+            span.error(ex);
+            throw new IllegalStateException("Falha na transportadora " + carrier, ex);
+        } catch (Exception ex) {
+            if (future != null) {
+                future.cancel(true);
+            }
+            span.error(ex);
+            throw new IllegalStateException("Tempo limite excedido na transportadora " + carrier, ex);
+        } finally {
+            span.end();
         }
     }
 

@@ -12,15 +12,18 @@ public class StoreRateLimiter {
 
     public boolean allow(String storeId) {
         long now = System.nanoTime();
+        if (!windows.containsKey(storeId) && windows.size() >= MAX_STORES) {
+            windows.entrySet().removeIf(entry -> now - entry.getValue().startedAt >= WINDOW_NANOS);
+            if (windows.size() >= MAX_STORES) {
+                return false;
+            }
+        }
         Window window = windows.compute(storeId, (key, current) -> {
             if (current == null || now - current.startedAt >= WINDOW_NANOS) {
                 return new Window(now, 1);
             }
             return new Window(current.startedAt, current.count + 1);
         });
-        if (windows.size() > MAX_STORES) {
-            windows.entrySet().removeIf(entry -> now - entry.getValue().startedAt >= WINDOW_NANOS);
-        }
         return window.count <= LIMIT_PER_SECOND;
     }
 

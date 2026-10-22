@@ -2,6 +2,7 @@ package br.com.rotacerta.cotacao.service;
 
 import br.com.rotacerta.cotacao.api.CarrierQuote;
 import br.com.rotacerta.cotacao.api.FreightQuoteResponse;
+import io.micrometer.context.ContextSnapshot;
 import java.math.BigDecimal;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
@@ -18,9 +19,13 @@ public class FreightQuoteService {
     }
 
     public FreightQuoteResponse quote(String origin, String destination, BigDecimal weight) {
+        ContextSnapshot snapshot = ContextSnapshot.captureAll();
         List<CompletableFuture<CarrierQuote>> requests = CARRIERS.stream()
-                .map(carrier -> CompletableFuture.supplyAsync(
-                        () -> partnerQuoteClient.quote(carrier, origin, destination, weight)))
+                .map(carrier -> CompletableFuture.supplyAsync(() -> {
+                    try (ContextSnapshot.Scope ignored = snapshot.setThreadLocals()) {
+                        return partnerQuoteClient.quote(carrier, origin, destination, weight);
+                    }
+                }))
                 .toList();
         List<CarrierQuote> quotes = requests.stream().map(CompletableFuture::join).toList();
         CarrierQuote best = Stream.concat(
