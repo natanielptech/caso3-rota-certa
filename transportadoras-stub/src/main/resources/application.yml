@@ -1,0 +1,33 @@
+server:
+  port: ${SERVER_PORT:8083}
+  shutdown: graceful
+
+spring:
+  application:
+    name: transportadoras-stub
+
+rotacerta:
+  stub:
+    delay-ms:
+      transvale: ${TRANSVALE_DELAY_MS:0}
+      rapida: ${RAPIDA_DELAY_MS:0}
+      economica: ${ECONOMICA_DELAY_MS:0}
+    fail:
+      transvale: ${TRANSVALE_FAIL:false}
+      rapida: ${RAPIDA_FAIL:false}
+      economica: ${ECONOMICA_FAIL:false}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      group:
+        liveness:
+          include: livenessState
+        readiness:
+          include: readinessState

@@ -1,0 +1,50 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: transportadoras-stub
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: transportadoras-stub
+  template:
+    metadata:
+      labels:
+        app: transportadoras-stub
+    spec:
+      containers:
+        - name: transportadoras-stub
+          image: rotacerta/transportadoras-stub:latest
+          ports:
+            - name: http
+              containerPort: 8083
+          env:
+            - name: TRANSVALE_DELAY_MS
+              value: "0"
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: http
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: http
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: transportadoras-stub
+spec:
+  selector:
+    app: transportadoras-stub
+  ports:
+    - name: http
+      port: 8083
+      targetPort: http

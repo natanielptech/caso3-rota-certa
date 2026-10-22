@@ -1,0 +1,32 @@
+services:
+  transportadoras-stub:
+    build:
+      context: .
+      dockerfile: transportadoras-stub/Dockerfile
+    environment:
+      TRANSVALE_DELAY_MS: ${TRANSVALE_DELAY_MS:-0}
+      TRANSVALE_FAIL: ${TRANSVALE_FAIL:-false}
+    ports:
+      - "8083:8083"
+  cotacao-frete-service:
+    build:
+      context: .
+      dockerfile: cotacao-frete-service/Dockerfile
+    environment:
+      TRANSVALE_URL: http://transportadoras-stub:8083/v1/partners/transvale
+      RAPIDA_URL: http://transportadoras-stub:8083/v1/partners/rapida
+      ECONOMICA_URL: http://transportadoras-stub:8083/v1/partners/economica
+    depends_on:
+      - transportadoras-stub
+    ports:
+      - "8081:8081"
+  pedidos-service:
+    build:
+      context: .
+      dockerfile: pedidos-service/Dockerfile
+    environment:
+      QUOTE_SERVICE_URL: http://cotacao-frete-service:8081
+    depends_on:
+      - cotacao-frete-service
+    ports:
+      - "8082:8082"
