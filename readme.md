@@ -75,3 +75,25 @@ A RotaCerta oferece a lojas virtuais um serviço de entregas: consulta de preço
 - [ ] `readinessProbe`/`livenessProbe` não dependem de serviços externos
 - [ ] Trace distribuído de uma criação de pedido visível de ponta a ponta, incluindo a chamada à transportadora
 - [ ] Dockerfile multi-estágio e manifestos Kubernetes (Deployment + HPA) incluídos no repositório
+
+## Executar o projeto
+
+Requisitos: Java 17+, Maven 3.9+ e Docker com Docker Compose.
+
+```bash
+mvn test
+docker compose up --build
+```
+
+Serviços locais:
+
+- Cotação: `GET http://localhost:8081/v1/cotacoes?origem=SP&destino=RJ&peso=2`, enviando `X-Loja-Id` para aplicar o limite por loja.
+- Pedidos: `POST http://localhost:8082/v1/pedidos` com `{"lojaId":"loja-1","origem":"SP","destino":"RJ","peso":2}`.
+- Health, métricas e circuit breakers: `/actuator/health`, `/actuator/prometheus` e `/actuator/circuitbreakers` no serviço de cotação.
+- Visualização de traces distribuídos: `http://localhost:16686` (Jaeger iniciado pelo Compose).
+
+Para reproduzir a lentidão da TransVale com o Compose, use `TRANSVALE_DELAY_MS=30000 docker compose up --build`. O timeout de 800 ms, retry idempotente e circuit breaker mantêm as demais transportadoras disponíveis; a cotação de referência é retornada com `"estimada": true`. O teste `SlowCarrierResilienceTest` simula essa resposta de 30 segundos e verifica o circuito, o fallback e as cotações das outras transportadoras.
+
+Os endereços das transportadoras, o endpoint interno e os atrasos/falhas do stub são configuráveis por variáveis de ambiente. Os pedidos são mantidos em memória nesta implementação de referência. Os probes de readiness e liveness verificam exclusivamente os estados locais do processo, sem consultar parceiros.
+
+Os manifestos de Kubernetes estão em `k8s/`; eles incluem Deployments, Services, probes e HPA de 4 a 40 réplicas com alvo de 60% de CPU. Configure `OTEL_EXPORTER_OTLP_ENDPOINT` para o collector do cluster. A propagação W3C `traceparent` entre os serviços é feita pelo cliente HTTP instrumentado do Spring Boot, e logs do Spring incluem os identificadores de trace/span no MDC.
