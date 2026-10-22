@@ -34,7 +34,7 @@ public class OrderController {
     }
 
     @GetMapping("/{id}")
-    public OrderResponse get(@PathVariable UUID id) {
+    public OrderResponse get(@PathVariable("id") UUID id) {
         return orderService.find(id)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Pedido não encontrado"));
     }

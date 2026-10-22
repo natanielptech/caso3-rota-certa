@@ -23,9 +23,9 @@ public class FreightQuoteController {
 
     @GetMapping
     public FreightQuoteResponse quote(
-            @RequestParam String origem,
-            @RequestParam String destino,
-            @RequestParam BigDecimal peso,
+            @RequestParam("origem") String origem,
+            @RequestParam("destino") String destino,
+            @RequestParam("peso") BigDecimal peso,
             @RequestHeader(name = "X-Loja-Id", defaultValue = "anonima") String lojaId) {
         if (origem.isBlank() || destino.isBlank() || peso.signum() <= 0) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Origem, destino e peso positivo são obrigatórios");

@@ -36,8 +36,8 @@ public class CarrierStubController {
 
     @GetMapping("/{carrier}")
     public CarrierQuote quote(
-            @PathVariable String carrier,
-            @RequestParam BigDecimal peso) {
+            @PathVariable("carrier") String carrier,
+            @RequestParam("peso") BigDecimal peso) {
         if (!BASE_PRICES.containsKey(carrier)) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Transportadora desconhecida");
         }
