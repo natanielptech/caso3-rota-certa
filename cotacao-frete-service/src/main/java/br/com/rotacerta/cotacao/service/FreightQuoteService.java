@@ -2,7 +2,8 @@ package br.com.rotacerta.cotacao.service;
 
 import br.com.rotacerta.cotacao.api.CarrierQuote;
 import br.com.rotacerta.cotacao.api.FreightQuoteResponse;
-import io.micrometer.context.ContextSnapshot;
+import io.micrometer.tracing.Span;
+import io.micrometer.tracing.Tracer;
 import java.math.BigDecimal;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
@@ -13,16 +14,21 @@ import org.springframework.stereotype.Service;
 public class FreightQuoteService {
     private static final List<String> CARRIERS = List.of("transvale", "rapida", "economica");
     private final PartnerQuoteClient partnerQuoteClient;
+    private final Tracer tracer;
 
-    public FreightQuoteService(PartnerQuoteClient partnerQuoteClient) {
+    public FreightQuoteService(PartnerQuoteClient partnerQuoteClient, Tracer tracer) {
         this.partnerQuoteClient = partnerQuoteClient;
+        this.tracer = tracer;
     }
 
     public FreightQuoteResponse quote(String origin, String destination, BigDecimal weight) {
-        ContextSnapshot snapshot = ContextSnapshot.captureAll();
+        Span parent = tracer.currentSpan();
         List<CompletableFuture<CarrierQuote>> requests = CARRIERS.stream()
                 .map(carrier -> CompletableFuture.supplyAsync(() -> {
-                    try (ContextSnapshot.Scope ignored = snapshot.setThreadLocals()) {
+                    if (parent == null) {
+                        return partnerQuoteClient.quote(carrier, origin, destination, weight);
+                    }
+                    try (Tracer.SpanInScope ignored = tracer.withSpan(parent)) {
                         return partnerQuoteClient.quote(carrier, origin, destination, weight);
                     }
                 }))

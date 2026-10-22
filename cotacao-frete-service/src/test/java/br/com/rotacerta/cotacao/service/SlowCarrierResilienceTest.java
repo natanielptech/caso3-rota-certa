@@ -4,6 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import br.com.rotacerta.cotacao.api.FreightQuoteResponse;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
+import io.micrometer.tracing.Span;
+import io.micrometer.tracing.Tracer;
 import com.sun.net.httpserver.HttpServer;
 import java.io.IOException;
 import java.math.BigDecimal;
@@ -33,6 +35,9 @@ class SlowCarrierResilienceTest {
 
     @Autowired
     private CircuitBreakerRegistry circuitBreakers;
+
+    @Autowired
+    private Tracer tracer;
 
     @BeforeAll
     static void startPartners() throws IOException {
@@ -84,10 +89,22 @@ class SlowCarrierResilienceTest {
 
     @Test
     void slowCarrierTimesOutOpensCircuitAndUsesReferenceRate() {
-        List<FreightQuoteResponse> responses = java.util.stream.IntStream.range(0, 20)
-                .parallel()
-                .mapToObj(index -> quoteService.quote("SP", "RJ", new BigDecimal("2.0")))
-                .toList();
+        Span root = tracer.nextSpan().name("test.quote").start();
+        String traceId = root.context().traceId();
+        List<FreightQuoteResponse> responses;
+        try (Tracer.SpanInScope ignored = tracer.withSpan(root)) {
+            List<java.util.concurrent.CompletableFuture<FreightQuoteResponse>> requests =
+                    java.util.stream.IntStream.range(0, 20)
+                            .mapToObj(index -> java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+                                try (Tracer.SpanInScope scope = tracer.withSpan(root)) {
+                                    return quoteService.quote("SP", "RJ", new BigDecimal("2.0"));
+                                }
+                            }))
+                            .toList();
+            responses = requests.stream().map(java.util.concurrent.CompletableFuture::join).toList();
+        } finally {
+            root.end();
+        }
 
         assertThat(circuitBreakers.circuitBreaker("transvale").getState().name()).isEqualTo("OPEN");
         assertThat(responses)
@@ -98,7 +115,7 @@ class SlowCarrierResilienceTest {
                         }));
         assertThat(responses.get(0).cotacoes()).anyMatch(quote -> "rapida".equals(quote.transportadora())
                 && !quote.estimada());
-        assertThat(observedTraceparent.get()).matches("00-[0-9a-f]{32}-[0-9a-f]{16}-0[01]");
+        assertThat(observedTraceparent.get()).startsWith("00-" + traceId + "-");
     }
 
     private static void respond(com.sun.net.httpserver.HttpExchange exchange, String body) throws IOException {

@@ -15,6 +15,9 @@ rotacerta:
       economica: ${ECONOMICA_URL:http://localhost:8083/v1/partners/economica}
 
 management:
+  otlp:
+    tracing:
+      endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://localhost:4318/v1/traces}
   endpoints:
     web:
       exposure:
@@ -31,6 +34,9 @@ management:
   tracing:
     sampling:
       probability: ${TRACING_SAMPLING_PROBABILITY:1.0}
+    propagation:
+      type:
+        - w3c
   metrics:
     tags:
       application: ${spring.application.name}

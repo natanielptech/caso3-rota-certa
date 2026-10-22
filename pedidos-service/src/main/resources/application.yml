@@ -12,6 +12,9 @@ rotacerta:
     timeout-ms: ${QUOTE_SERVICE_TIMEOUT_MS:1200}
 
 management:
+  otlp:
+    tracing:
+      endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://localhost:4318/v1/traces}
   endpoints:
     web:
       exposure:
@@ -28,6 +31,9 @@ management:
   tracing:
     sampling:
       probability: ${TRACING_SAMPLING_PROBABILITY:1.0}
+    propagation:
+      type:
+        - w3c
   metrics:
     tags:
       application: ${spring.application.name}
